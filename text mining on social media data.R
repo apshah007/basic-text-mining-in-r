@@ -7,6 +7,8 @@ library(dplyr) # Data manipulation
 library(tidyr) # Spread, separate, unite, text mining
 library(ggplot2) #Visualization
 library(textdata)
+library(wordcloud)
+library(reshape2)
 
 
 data <- read.csv("messages1.csv")
@@ -34,126 +36,75 @@ numbered<- count(without_stop_words$word)
 numbered %>% filter(freq > 100) %>% ggplot(aes(reorder(x, freq), freq)) +
   geom_bar(stat = "identity") + coord_flip()
 
+#library(wordcloud)
+# this word cloud works 
+
+wordcloud(words = numbered$x, freq = numbered$freq, min.freq = 1,
+          max.words=200, random.order=FALSE, rot.per=0.35,)
+
+  
+colnames(numbered)[1] = "word"
+  
 # Sentiment Analysis
-sentiments
-table(sentiments$lexicon)
-get_sentiments("nrc")
+#sentiments
+#table(sentiments$lexicon)
+#get_sentiments("nrc")
 
 
 # What are the most common joy words in  dickens books
-nrc_joy <- get_sentiments("nrc") %>% 
-  filter(sentiment == "joy")
+#nrc_joy <- get_sentiments("nrc") %>% 
+#  filter(sentiment == "joy")
 ################################################################################
 #   I  am now here.  I am not able to understand the sentiment analyis code, but 
 #  I successfully created a frequency table of the most common words used.
 ################################################################################
 
 
+nrc_joy <- get_sentiments("nrc") %>%
+  filter(sentiment == "joy")
 
 
-# bing
-bing_data <- numbered %>%
-  inner_join(get_sentiments("bing")) %>%
-  count(x, sentiments) %>%
-  ungroup()
-bing_data
+innerjtables <- merge(numbered, nrc_joy, by = "word")
 
-# Plot words and sentiments
-bing_data %>%
-  group_by(sentiment) %>% top_n(10) %>% ungroup() %>%
-  ggplot(aes(reorder(word, n), n, fill = sentiment)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~sentiment, scales = "free_y") +
-  labs(y = " Words contribution to sentiment", x = NULL) +
-  coord_flip()
-
-# Word clouds
-#install.packages("wordcloud")
-library(wordcloud)
-
-numbered %>%
-  count(numbered$x) %>%
-  with(wordcloud(x, n, max.words = 100))
+counted_innerjtable<- count(innerjtables, "word")
 
 
-tidy_dickens %>%
-  anti_join(stop_words) %>%
-  count(word) %>%
-  with(wordcloud(word, n, max.words = 100))
+#bar chart of joy words 
+counted_innerjtable %>% filter(freq > 20) %>% ggplot(aes(reorder(word, freq), freq)) +
+  geom_bar(stat = "identity") + coord_flip()
+
+
+#word cloud of joy words
+wordcloud(words = counted_innerjtable$word, freq = counted_innerjtable$freq, min.freq = 1,
+          max.words=250, random.order=FALSE, rot.per=0.35,)
+
+
+bingsent<-get_sentiments("bing")
+mergedtobing <- merge(bingsent, numbered, by = "word")
+sentiment_breakdown<- count(mergedtobing$sentiment)
+
+
+analyze_sentiment<- mergedtobing %>% 
+  group_by(word) %>%
+  spread(sentiment, freq, fill = 0) %>%
+  mutate(sentimentchange = positive - negative)
+
+
+#nonworking plot for sentiment analysis 
+ggplot(analyze_sentiment, aes(x = analyze_sentiment$positive, 
+                              y = analyze_sentiment$sentimentchange))
+ 
+
+
 
 # Sentiment comparison word cloud
 #install.packages("reshape2")
-library(reshape2)
-tidy_dickens %>%
-  inner_join(get_sentiments("bing")) %>%
-  count(word, sentiment, sort = TRUE) %>%
-  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+#library(reshape2)
+
+#working sentiment analysis word cloud 
+
+mergedtobing %>%
+  acast(word ~ sentiment, value.var = "freq", fill = 0) %>%
   comparison.cloud(colors = c("red", "green4"),
                    max.words = 100)
 
-# Relationships between words - bigrams
-bigrams_dickens <- dickens %>%
-  unnest_tokens(bigram, text, token = "ngrams", n = 2)
-
-bigrams_dickens
-
-# Remove stop words
-bigrams_dickens_separated <- bigrams_dickens %>%
-  separate(bigram, c("word1", "word2"), sep = " ")
-
-bigrams_dickens_filtered <- bigrams_dickens_separated %>%
-  filter(!word1 %in% stop_words$word) %>%
-  filter(!word2 %in% stop_words$word)
-
-# new bigram counts:
-bigrams_dickens_filtered %>% 
-  count(word1, word2, sort = TRUE)
-
-# And then unite() the two words
-bigrams_dickens_united <- bigrams_dickens_filtered %>%
-  unite(bigram, word1, word2, sep = " ")
-
-bigrams_dickens_united
-
-# Plot
-bigrams_dickens_united %>%  count(bigram, sort = TRUE) %>% top_n(20) %>% ggplot(aes(reorder(bigram, n), n)) +
-  geom_bar(stat = "identity") +  coord_flip()
-
-# TF-IDF
-GreatExpec <- gutenberg_download(1400)
-
-
-GreatExpec <- GreatExpec %>%
-  mutate(linenumber = row_number(),
-         chapter = cumsum(str_detect(text, "^Chapter[\\s][IVXL]"))) 
-
-GreatExpec <- GreatExpec %>% unnest_tokens(word, text)
-
-# Remove stop words
-GreatExpec <- GreatExpec %>% anti_join(stop_words)
-
-# Show the word frequency of great expectation
-GreatExpec <- GreatExpec %>% count(chapter, word, sort = TRUE)
-
-# tf-idf
-chapter_words <- GreatExpec %>%
-  bind_tf_idf(word, chapter, n)
-
-chapter_words
-
-# Arrange
-chapter_words %>%
-  arrange((tf_idf))
-
-# Visualize
-
-chapter_words %>%
-  filter(chapter %in% c(1,2,3,4,5,6)) %>%
-  arrange(-tf_idf) %>%
-  group_by(chapter) %>%
-  top_n(10) %>%
-  ungroup %>%
-  ggplot(aes(reorder(word, tf_idf), tf_idf, fill = chapter)) +
-  geom_bar(stat = "identity") +
-  facet_wrap(~chapter, scales = "free") +
-  coord_flip()
